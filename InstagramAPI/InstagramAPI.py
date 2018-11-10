@@ -25,7 +25,7 @@ try:
     from moviepy.editor import VideoFileClip
 except ImportError:
     print("Fail to import moviepy. Need only for Video upload.")
-    
+
 
 # The urllib library was split into other modules from Python 2 to Python 3
 if sys.version_info.major == 3:
@@ -141,7 +141,22 @@ class InstagramAPI:
     def logout(self):
         logout = self.SendRequest('accounts/logout/')
 
-    def uploadPhoto(self, photo, caption=None, upload_id=None, is_sidecar=None):
+    def uploadPhoto(self, photo, caption=None, upload_id=None, is_sidecar=None, usertags=[]):
+        """
+        Uploads a single photo
+
+        Args:
+            photo
+            caption (optional)
+            upload_id (optional)
+            is_sidecar (optional)
+            usertags (optional)
+                needs to be a list of dicts like:
+                    [{"user_id": 123456789, "position": [x, y]},
+                     ....
+                    ]
+                where each item represents a usertag and x, y are floats between 0.0 and 1.0
+        """
         if upload_id is None:
             upload_id = str(int(time.time() * 1000))
         data = {'upload_id': upload_id,
@@ -151,6 +166,11 @@ class InstagramAPI:
                 'photo': ('pending_media_%s.jpg' % upload_id, open(photo, 'rb'), 'application/octet-stream', {'Content-Transfer-Encoding': 'binary'})}
         if is_sidecar:
             data['is_sidecar'] = '1'
+
+        # If usertags are provided, verify that the entries are valid.
+        if usertags:
+            self.throwIfInvalidUsertags(usertags)
+
         m = MultipartEncoder(data, boundary=self.uuid)
         self.s.headers.update({'X-IG-Capabilities': '3Q4=',
                                'X-IG-Connection-Type': 'WIFI',
@@ -162,7 +182,7 @@ class InstagramAPI:
                                'User-Agent': self.USER_AGENT})
         response = self.s.post(self.API_URL + "upload/photo/", data=m.to_string())
         if response.status_code == 200:
-            if self.configure(upload_id, photo, caption):
+            if self.configure(upload_id, photo, caption, usertags):
                 self.expose()
         return False
 
@@ -304,7 +324,7 @@ class InstagramAPI:
                     except:
                         correct = False
                 try:
-                    user_id = long(user_id)
+                    user_id = int(user_id)
                     if user_id < 0:
                         correct = False
                 except:
@@ -387,7 +407,7 @@ class InstagramAPI:
             except:
                 pass
             return False
-    
+
     def direct_message(self, text, recipients):
         if type(recipients) != type([]):
             recipients = [str(recipients)]
@@ -429,7 +449,7 @@ class InstagramAPI:
         )
         #self.SendRequest(endpoint,post=data) #overwrites 'Content-type' header and boundary is missed
         response = self.s.post(self.API_URL + endpoint, data=data)
-        
+
         if response.status_code == 200:
             self.LastResponse = response
             self.LastJson = json.loads(response.text)
@@ -443,7 +463,7 @@ class InstagramAPI:
             except:
                 pass
             return False
-        
+
     def direct_share(self, media_id, recipients, text=None):
         if not isinstance(position, list):
             recipients = [str(recipients)]
@@ -529,7 +549,9 @@ class InstagramAPI:
         })
         return self.SendRequest('media/configure/?video=1', self.generateSignature(data))
 
-    def configure(self, upload_id, photo, caption=''):
+    def configure(self, upload_id, photo, caption='', usertags=[]):
+        usertags = {'in': [{'user_id': str(u['user_id']), 'position': u['position']} for u in usertags]}
+        usertags = json.dumps(usertags, separators=(',', ':'))
         (w, h) = getImageSize(photo)
         data = json.dumps({'_csrftoken': self.token,
                            'media_folder': 'Instagram',
@@ -539,6 +561,7 @@ class InstagramAPI:
                            'caption': caption,
                            'upload_id': upload_id,
                            'device': self.DEVICE_SETTINTS,
+                           'usertags': usertags,
                            'edits': {
                                'crop_original_size': [w * 1.0, h * 1.0],
                                'crop_center': [0.0, 0.0],
